@@ -180,6 +180,9 @@ python -m vlagents start-server openvla --host localhost --port 8080 --kwargs '{
 # openpi
 python -m vlagents start-server openpi --port=8080 --host=localhost --kwargs='{"checkpoint_path": "<path to checkpoint>/{checkpoint_step}", "model_name": "pi0_rcs", "checkpoint_step": <checkpoint_step>}' # leave "{checkpoint_step}" it will be replaced, "model_name" is the key for the training config
 
+# drp (DRP / IMPACT goal-conditioned motion planner, model code from an impact checkout)
+python -m vlagents start-server drp --host localhost --port 20000 --kwargs '{"checkpoint_path": "~/drp/ckpt/<exp_name>", "impact_root": "~/drp/impact_eefgoal"}'
+
 # vjepa2-ac
 python -m vlagents start-server vjepa --port=20997 --host=0.0.0.0 --kwargs='{"cfg_path": "configs/inference/vjepa2-ac-vitg/<your_config>.yaml", "model_name": "vjepa2_ac_vit_giant", "default_checkpoint_path": "../.cache/torch/hub/checkpoints/vjepa2-ac-vitg.pt"}'
 ```
