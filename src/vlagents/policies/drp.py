@@ -24,6 +24,8 @@ Optional SingleObs.info keys for a GUI (absent = the behaviour above):
                         joints) and returns it in info {"obs": ...}, e.g. a camera preview while idle.
   "return_obs": True    normal act(), plus acts[0].info["obs"].
   "return_meta": True   normal act(), plus acts[0].info["meta"].
+  "depth_gate": False   ablation: skip the 0.01-3 m clipping range (only invalid depth -> 0). Out of distribution:
+                        the checkpoints were trained on renders clipped to that range.
   "goal_ee": (7,)       goal_repr eef* only: panda_link8 pose in panda_link0, xyz [m] + xyzw quaternion, used
                         instead of FK(goal_joints); goal_repr "eef" may then omit goal_joints.
   info["obs"] = {"<slot>_rgb": uint8 (240,320,3), "<slot>_depth": uint16 (240,320) = metres * depth_scale
@@ -234,7 +236,13 @@ class DrpAgent(Agent):
 
     # ------------------------------------------------------------------ obs (DrpPolicy.build_obs)
     def build_obs(
-        self, q: np.ndarray, goal: np.ndarray | None, cameras: dict, intrinsics: dict | None, goal_ee=None
+        self,
+        q: np.ndarray,
+        goal: np.ndarray | None,
+        cameras: dict,
+        intrinsics: dict | None,
+        goal_ee=None,
+        depth_gate: bool = True,
     ) -> dict:
         def batched(a) -> np.ndarray:
             return np.asarray(a, dtype=np.float32)[None, None]
@@ -255,8 +263,12 @@ class DrpAgent(Agent):
         for slot in self.depth_slots:
             depth_raw = np.asarray(cameras[f"{slot}_depth"], dtype=np.float32)
             depth_m = _resize(depth_raw, POLICY_HW, nearest=True)
-            # DepthMask.apply: keep SIM_NEAR <= d < SIM_FAR (non-finite -> 0), everything else means "no return"
-            depth_m = np.where(np.isfinite(depth_m) & (depth_m >= SIM_NEAR_M) & (depth_m < SIM_FAR_M), depth_m, 0.0)
+            if depth_gate:
+                # the renderer's clipping range: keep SIM_NEAR <= d < SIM_FAR (non-finite -> 0), everything else means
+                # "no return"
+                depth_m = np.where(np.isfinite(depth_m) & (depth_m >= SIM_NEAR_M) & (depth_m < SIM_FAR_M), depth_m, 0.0)
+            else:  # ablation (info["depth_gate"] = False): pass the camera's range through, only drop invalid values
+                depth_m = np.where(np.isfinite(depth_m) & (depth_m > 0.0), depth_m, 0.0)
             # to_policy_units: metres -> renderer's stored integer (2 mm steps at depth_scale 500)
             obs[f"{slot}_depth"] = batched(np.round(depth_m.astype(np.float64) * self.depth_scale))
             if self.depth_type[slot] == "pointmap":
@@ -307,7 +319,14 @@ class DrpAgent(Agent):
         ]
         if missing:
             raise ValueError(f"missing camera frames {missing}, got {sorted(single_obs.cameras)}")
-        obs_np = self.build_obs(single_obs.joints, goal, single_obs.cameras, info.get("intrinsics"), goal_ee=goal_ee)
+        obs_np = self.build_obs(
+            single_obs.joints,
+            goal,
+            single_obs.cameras,
+            info.get("intrinsics"),
+            goal_ee=goal_ee,
+            depth_gate=bool(info.get("depth_gate", True)),
+        )
         if query == "obs":
             return self._info_act(robot_name, {"obs": self.display_obs(obs_np)})
         torch = self._torch
